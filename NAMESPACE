@@ -1,0 +1,10 @@
+# tinyrox says don't edit this manually, but it can't stop you!
+
+export(check_code_cran)
+export(check_cran)
+export(check_description_cran)
+export(check_examples_cran)
+export(clean)
+export(document)
+export(fix_description_cran)
+export(parse_tags)

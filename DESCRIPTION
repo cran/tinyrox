@@ -1,0 +1,22 @@
+Package: tinyrox
+Title: Minimal R Documentation Generator
+Version: 0.3.3
+Authors@R: 
+    person("Troy", "Hernandez", email = "troy@cornball.ai", role = c("aut", "cre"),
+           comment = c(ORCID = "0009-0005-4248-604X"))
+Description: A deterministic, dependency-free documentation generator for R
+    packages. Generates valid Rd files and NAMESPACE from 'roxygen2'-style comments
+    using only base R. Supports a strict subset of tags with no markdown parsing,
+    no inference magic, and explicit-only behavior.
+License: GPL-3
+URL: https://github.com/cornball-ai/tinyrox
+BugReports: https://github.com/cornball-ai/tinyrox/issues
+Encoding: UTF-8
+Suggests: tinytest
+NeedsCompilation: no
+Packaged: 2026-04-08 14:32:30 UTC; troy
+Author: Troy Hernandez [aut, cre] (ORCID:
+    <https://orcid.org/0009-0005-4248-604X>)
+Maintainer: Troy Hernandez <troy@cornball.ai>
+Repository: CRAN
+Date/Publication: 2026-04-15 12:40:02 UTC

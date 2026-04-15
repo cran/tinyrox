@@ -1,0 +1,23 @@
+% tinyrox says don't edit this manually, but it can't stop you!
+\name{resolve_inherit_params}
+\alias{resolve_inherit_params}
+\title{Resolve @inheritParams Tags}
+\usage{
+resolve_inherit_params(tags, all_tags, formals)
+}
+\arguments{
+\item{tags}{Current function's parsed tags.}
+
+\item{all_tags}{Named list of all parsed tags (name -> tags).}
+
+\item{formals}{Current function's formals (list with names and usage).}
+}
+\value{
+Updated tags with inherited params merged in.
+}
+\description{
+Copies parameter documentation from source functions to the current function.
+Only inherits params that are: (1) in the current function's formals, and
+(2) not already documented in the current function.
+}
+\keyword{internal}
