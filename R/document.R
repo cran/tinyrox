@@ -10,10 +10,16 @@
 #'   \item{"append"}{Insert between ## tinyrox start/end markers}
 #'   \item{"none"}{Don't modify NAMESPACE}
 #' }
-#' @param cran_check Run CRAN compliance checks (DESCRIPTION quoting,
-#'   web service links, code issues, missing examples). Default TRUE.
+#' @param cran_check Run CRAN compliance checks (code issues and missing
+#'   examples) and undocumented-parameter warnings. Default TRUE.
+#' @param silent Operate less verbose without messages. Default FALSE.
+#' @param prune_rd Remove stale Rd files for topics no longer documented
+#'   (e.g. after a rename or deletion)? Only files tinyrox generated are
+#'   removed; hand-written Rd is never touched. Default TRUE. Set FALSE to
+#'   leave existing Rd in place.
 #' @return Invisibly returns a list with:
 #'   - rd_files: character vector of generated Rd file paths
+#'   - pruned: character vector of stale Rd file paths removed
 #'   - namespace: path to NAMESPACE file (or NULL if mode="none")
 #'
 #' @export
@@ -39,14 +45,15 @@
 #' # Clean up
 #' unlink(pkg, recursive = TRUE)
 #' }
-document <- function (path = ".", namespace = c("overwrite", "append", "none"),
-                      cran_check = TRUE) {
+document <- function(path = ".",
+                     namespace = c("overwrite", "append", "none"),
+                     cran_check = TRUE, silent = FALSE, prune_rd = TRUE) {
     namespace <- match.arg(namespace)
 
     # Validate path
     if (!file.exists(file.path(path, "DESCRIPTION"))) {
         stop("No DESCRIPTION file found in ", path,
-            ". Is this an R package?", call. = FALSE)
+             ". Is this an R package?", call. = FALSE)
     }
 
     # Check CRAN compliance
@@ -55,34 +62,63 @@ document <- function (path = ".", namespace = c("overwrite", "append", "none"),
     }
 
     # Parse all R files
-    message("Parsing R files...")
+    if (!silent) {
+        message("Parsing R files...")
+    }
     blocks <- parse_package(path)
 
     if (length(blocks) == 0) {
-        message("No documentation blocks found.")
-        return(invisible(list(rd_files = character(), namespace = NULL)))
+        if (!silent) {
+            message("No documentation blocks found.")
+        }
+        # Nothing is generated this run, so every tinyrox-owned Rd is now stale
+        # (e.g. the last documented topic was deleted). Prune them too.
+        pruned <- character()
+        if (prune_rd) {
+            pruned <- prune_stale_rd(path, character(), silent)
+        }
+        return(invisible(list(rd_files = character(), pruned = pruned,
+                              namespace = NULL)))
     }
 
-    message("Found ", length(blocks), " documentation block(s).")
+    if (!silent) {
+        message("Found ", length(blocks), " documentation block(s).")
+    }
 
     # Generate Rd files
-    message("Generating Rd files...")
-    rd_files <- generate_all_rd(blocks, path)
-    message("Generated ", length(rd_files), " Rd file(s).")
+    if (!silent) {
+        message("Generating Rd files...")
+    }
+    rd_files <- generate_all_rd(blocks, path, cran_check)
+    if (!silent) {
+        message("Generated ", length(rd_files), " Rd file(s).")
+    }
+
+    # Prune stale Rd left behind by renamed or deleted topics (tinyrox-owned
+    # files only; hand-written Rd is never removed).
+    pruned <- character()
+    if (prune_rd) {
+        pruned <- prune_stale_rd(path, rd_files, silent)
+    }
 
     # Generate NAMESPACE
     ns_file <- NULL
     if (namespace != "none") {
-        message("Generating NAMESPACE...")
+        if (!silent) {
+            message("Generating NAMESPACE...")
+        }
         ns_content <- generate_namespace(blocks)
         ns_file <- write_namespace(ns_content, path, namespace)
-        message("Updated NAMESPACE.")
+        if (!silent) {
+            message("Updated NAMESPACE.")
+        }
     }
 
-    invisible(list(
-            rd_files = rd_files,
-            namespace = ns_file
-        ))
+    if (!silent) {
+        message("Leaving DESCRIPTION alone as one should.")
+    }
+
+    invisible(list(rd_files = rd_files, pruned = pruned, namespace = ns_file))
 }
 
 #' Clean Generated Files
@@ -110,7 +146,7 @@ document <- function (path = ".", namespace = c("overwrite", "append", "none"),
 #' # Clean up
 #' unlink(pkg, recursive = TRUE)
 #' }
-clean <- function (path = ".", namespace = FALSE) {
+clean <- function(path = ".", namespace = FALSE) {
     man_dir <- file.path(path, "man")
 
     if (dir.exists(man_dir)) {
@@ -131,4 +167,3 @@ clean <- function (path = ".", namespace = FALSE) {
 
     invisible(NULL)
 }
-

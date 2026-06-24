@@ -3,12 +3,15 @@
 \alias{generate_all_rd}
 \title{Generate All Rd Files for a Package}
 \usage{
-generate_all_rd(blocks, path = ".")
+generate_all_rd(blocks, path = ".", cran_check = TRUE)
 }
 \arguments{
 \item{blocks}{List of documentation blocks from parse_package().}
 
 \item{path}{Package root path.}
+
+\item{cran_check}{Emit CRAN-compliance warnings (undocumented
+parameters). Default TRUE.}
 }
 \value{
 Character vector of generated file paths.

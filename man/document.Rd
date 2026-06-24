@@ -4,7 +4,7 @@
 \title{Generate Documentation for an R Package}
 \usage{
 document(path = ".", namespace = c("overwrite", "append", "none"),
-         cran_check = TRUE)
+         cran_check = TRUE, silent = FALSE, prune_rd = TRUE)
 }
 \arguments{
 \item{path}{Path to package root directory. Default is current directory.}
@@ -16,12 +16,20 @@ document(path = ".", namespace = c("overwrite", "append", "none"),
 \item{"none"}{Don't modify NAMESPACE}
 }}
 
-\item{cran_check}{Run CRAN compliance checks (DESCRIPTION quoting,
-web service links, code issues, missing examples). Default TRUE.}
+\item{cran_check}{Run CRAN compliance checks (code issues and missing
+examples) and undocumented-parameter warnings. Default TRUE.}
+
+\item{silent}{Operate less verbose without messages. Default FALSE.}
+
+\item{prune_rd}{Remove stale Rd files for topics no longer documented
+(e.g. after a rename or deletion)? Only files tinyrox generated are
+removed; hand-written Rd is never touched. Default TRUE. Set FALSE to
+leave existing Rd in place.}
 }
 \value{
 Invisibly returns a list with:
   - rd_files: character vector of generated Rd file paths
+  - pruned: character vector of stale Rd file paths removed
   - namespace: path to NAMESPACE file (or NULL if mode="none")
 }
 \description{

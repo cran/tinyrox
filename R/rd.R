@@ -1,15 +1,45 @@
+#' Header Marker for tinyrox-Generated Rd Files
+#'
+#' The first line of every Rd file tinyrox writes. It both warns against hand
+#' editing and lets tinyrox recognise files it owns (see tinyrox_owns_rd()),
+#' so document() can prune only its own stale pages.
+#' @keywords internal
+RD_MARKER <- "% tinyrox says don't edit this manually, but it can't stop you!"
+
+#' Render User-Defined @section Blocks to Rd
+#'
+#' Emits one Rd section macro per parsed @section tag. Content is
+#' passed through verbatim as Rd (tinyrox does no markdown parsing), matching
+#' how the title-only macros elsewhere treat hand-written Rd markup.
+#'
+#' @param sections List of `list(title=, content=)` from parse_tags().
+#' @return Character vector of Rd lines (empty when there are no sections).
+#' @keywords internal
+render_sections <- function(sections) {
+    lines <- character()
+    for (sec in sections) {
+        lines <- c(lines, paste0("\\section{", escape_rd(sec$title), "}{"))
+        lines <- c(lines, sec$content)
+        lines <- c(lines, "}")
+    }
+    lines
+}
+
 #' Generate Rd File Content
 #'
 #' @param tags Parsed tags from parse_tags().
 #' @param formals Character vector of formal argument names (for functions).
 #' @param source_file Source file path (for header comment).
+#' @param pkg_generics Character vector of S3 generics defined in the
+#'   package itself, used for S3 method detection in usage lines.
 #' @return Character string of Rd content.
 #' @keywords internal
-generate_rd <- function (tags, formals = NULL, source_file = NULL, pkg_generics = character()) {
+generate_rd <- function(tags, formals = NULL, source_file = NULL,
+                        pkg_generics = character()) {
     lines <- character()
 
     # Header comment - distinctively tinyrox
-    lines <- c(lines, "% tinyrox says don't edit this manually, but it can't stop you!")
+    lines <- c(lines, RD_MARKER)
 
     # Required sections
     lines <- c(lines, paste0("\\name{", escape_rd(tags$name), "}"))
@@ -95,6 +125,9 @@ generate_rd <- function (tags, formals = NULL, source_file = NULL, pkg_generics 
         lines <- c(lines, "}")
     }
 
+    # User-defined @section blocks (after details, like roxygen2)
+    lines <- c(lines, render_sections(tags$sections))
+
     # References
     if (!is.null(tags$references)) {
         lines <- c(lines, "\\references{")
@@ -133,11 +166,11 @@ generate_rd <- function (tags, formals = NULL, source_file = NULL, pkg_generics 
 #' @param format_string Format description (e.g., "An object of class list of length 3").
 #' @return Character string of Rd content.
 #' @keywords internal
-generate_data_rd <- function (tags, source_file = NULL, format_string = NULL) {
+generate_data_rd <- function(tags, source_file = NULL, format_string = NULL) {
     lines <- character()
 
     # Header comment - distinctively tinyrox
-    lines <- c(lines, "% tinyrox says don't edit this manually, but it can't stop you!")
+    lines <- c(lines, RD_MARKER)
 
     # docType for data
     lines <- c(lines, "\\docType{data}")
@@ -230,15 +263,13 @@ generate_data_rd <- function (tags, source_file = NULL, format_string = NULL) {
 #' @param pkg_path Package root path.
 #' @return Format string or NULL if object cannot be inspected.
 #' @keywords internal
-format_object_info <- function (name, pkg_path) {
+format_object_info <- function(name, pkg_path) {
     # Try to get object from package namespace
     pkg_name <- get_package_name(pkg_path)
 
     # First try: check if package is already loaded
-    obj <- tryCatch(
-        get(name, envir = asNamespace(pkg_name)),
-        error = function (e) NULL
-    )
+    obj <- tryCatch(get(name, envir = asNamespace(pkg_name)),
+                    error = function(e) NULL)
 
     # Second try: source the R file and get the object
     if (is.null(obj)) {
@@ -253,9 +284,9 @@ format_object_info <- function (name, pkg_path) {
                 # Try to source this file in a temp environment
                 env <- new.env()
                 tryCatch({
-                        source(f, local = env, chdir = TRUE)
-                        obj <- get(name, envir = env)
-                    }, error = function(e) NULL)
+                    source(f, local = env, chdir = TRUE)
+                    obj <- get(name, envir = env)
+                }, error = function(e) NULL)
                 break
             }
         }
@@ -272,43 +303,6 @@ format_object_info <- function (name, pkg_path) {
     paste0("An object of class \\code{", obj_class, "} of length ", obj_len, ".")
 }
 
-#' Get Maintainer Info from DESCRIPTION
-#'
-#' Reads Authors@R from DESCRIPTION and formats maintainer for Rd.
-#'
-#' @param path Package root path.
-#' @return Formatted author string or NULL.
-#' @keywords internal
-get_maintainer_from_desc <- function(path) {
-    desc_file <- file.path(path, "DESCRIPTION")
-    if (!file.exists(desc_file)) return(NULL)
-
-    desc <- read.dcf(desc_file)
-    if (!"Authors@R" %in% colnames(desc)) return(NULL)
-
-    authors_r <- desc[1, "Authors@R"]
-    # Parse the Authors@R field
-    authors <- tryCatch(
-        eval(parse(text = authors_r)),
-        error = function(e) NULL
-    )
-    if (is.null(authors)) return(NULL)
-
-    # Find maintainer (cre role)
-    maintainers <- Filter(function(a) "cre" %in% a$role, authors)
-    if (length(maintainers) == 0) return(NULL)
-
-    # Format like roxygen2: \strong{Maintainer}: Name \email{email}
-    m <- maintainers[[1]]
-    name <- paste(m$given, m$family)
-    email <- m$email
-    if (!is.null(email) && nchar(email) > 0) {
-        paste0("\\strong{Maintainer}: ", name, " \\email{", email, "}")
-    } else {
-        paste0("\\strong{Maintainer}: ", name)
-    }
-}
-
 #' Escape Special Characters for Rd
 #'
 #' Escapes special characters for Rd format, but detects and preserves
@@ -318,7 +312,9 @@ get_maintainer_from_desc <- function(path) {
 #' @return Escaped text.
 #' @keywords internal
 escape_rd <- function(text) {
-    if (is.null(text)) return("")
+    if (is.null(text)) {
+        return("")
+    }
 
     # Check if text contains Rd markup (backslash commands like \describe, \item,
     # \Sexpr[...]{}, etc.). If so, pass through with minimal escaping (just %).
@@ -344,13 +340,11 @@ escape_rd <- function(text) {
 #'
 #' @param name Function name.
 #' @param args Character vector of arguments with defaults.
+#' @param pkg_generics Character vector of S3 generics defined in the
+#'   package itself, used for S3 method detection.
 #' @return Formatted usage string.
 #' @keywords internal
-format_usage <- function(
-    name,
-    args,
-    pkg_generics = character()
-) {
+format_usage <- function(name, args, pkg_generics = character()) {
     # Check if it's a replacement function (name ends with <-)
     is_replacement <- grepl("<-$", name)
 
@@ -358,10 +352,17 @@ format_usage <- function(
     s3_info <- detect_s3_method(name, pkg_generics)
     if (!is.null(s3_info)) {
         gen_display <- s3_info$generic
-        if (is_replacement) gen_display <- sub("<-$", "", gen_display)
-        display_name <- paste0("\\method{", gen_display, "}{", s3_info$class, "}")
+        if (is_replacement) {
+            gen_display <- sub("<-$", "", gen_display)
+        }
+        display_name <- paste0("\\method{", gen_display, "}{",
+                               s3_info$class, "}")
     } else {
-        display_name <- if (is_replacement) sub("<-$", "", name) else name
+        if (is_replacement) {
+            display_name <- sub("<-$", "", name)
+        } else {
+            display_name <- name
+        }
     }
 
     # For replacement functions, last arg is 'value' which goes on the right side
@@ -378,8 +379,17 @@ format_usage <- function(
     }
 
     # For replacement functions, wrap only the LHS args
-    wrap_args <- if (is_replacement && length(args) >= 1) args[-length(args)] else args
-    close_suffix <- if (is_replacement) ") <- value" else ")"
+    if (is_replacement && length(args) >= 1) {
+        wrap_args <- args[-length(args)]
+    } else {
+        wrap_args <- args
+    }
+
+    if (is_replacement) {
+        close_suffix <- ") <- value"
+    } else {
+        close_suffix <- ")"
+    }
 
     # Wrap to multiple lines, packing multiple args per line
     # Continuation lines indented to align after opening paren
@@ -390,7 +400,11 @@ format_usage <- function(
 
     for (i in seq_along(wrap_args)) {
         arg <- wrap_args[i]
-        suffix <- if (i < length(wrap_args)) ", " else ""
+        if (i < length(wrap_args)) {
+            suffix <- ", "
+        } else {
+            suffix <- ""
+        }
         piece <- paste0(arg, suffix)
 
         if (nchar(current) + nchar(piece) > 80 && current != open) {
@@ -414,23 +428,22 @@ format_usage <- function(
 #' @param width Maximum line width.
 #' @return Wrapped text with newlines.
 #' @keywords internal
-wrap_text <- function(
-    text,
-    width = 72
-) {
+wrap_text <- function(text, width = 72) {
     if (is.null(text) || nchar(text) <= width) {
         return(text)
     }
 
     # Split into words
 
-    words <- strsplit(text, "\\s+") [[1]]
-    if (length(words) == 0) return(text)
+    words <- strsplit(text, "\\s+")[[1]]
+    if (length(words) == 0) {
+        return(text)
+    }
 
     lines <- character()
     current_line <- words[1]
 
-    for (word in words[- 1]) {
+    for (word in words[-1]) {
         test_line <- paste(current_line, word)
         if (nchar(test_line) <= width) {
             current_line <- test_line
@@ -450,11 +463,7 @@ wrap_text <- function(
 #' @param name Topic name.
 #' @param path Package root path.
 #' @keywords internal
-write_rd <- function(
-    content,
-    name,
-    path = "."
-) {
+write_rd <- function(content, name, path = ".") {
     man_dir <- file.path(path, "man")
 
     if (!dir.exists(man_dir)) {
@@ -496,6 +505,58 @@ write_rd <- function(
     filepath
 }
 
+#' Identify a tinyrox-Generated Rd File
+#'
+#' Returns TRUE only if the file's first line is exactly RD_MARKER. This is
+#' deliberately conservative: hand-written Rd, or Rd written by other tools,
+#' never matches, so prune_stale_rd() cannot delete them.
+#'
+#' @param file Path to an Rd file.
+#' @return TRUE if tinyrox generated the file, FALSE otherwise.
+#' @keywords internal
+tinyrox_owns_rd <- function(file) {
+    con <- file(file, "r")
+    on.exit(close(con))
+    line1 <- readLines(con, n = 1, warn = FALSE)
+    length(line1) == 1L && identical(line1, RD_MARKER)
+}
+
+#' Prune Stale tinyrox-Generated Rd Files
+#'
+#' Removes man/*.Rd files that the current document() run did not
+#' (re)generate, but only those tinyrox can prove it owns via
+#' tinyrox_owns_rd(). Hand-written Rd, and any Rd lacking the marker, are
+#' left untouched.
+#'
+#' @param path Package root directory.
+#' @param generated Character vector of Rd file paths produced this run.
+#' @param silent Suppress the removal message? Default FALSE.
+#' @return Character vector of removed file paths (invisibly).
+#' @keywords internal
+prune_stale_rd <- function(path, generated, silent = FALSE) {
+    man_dir <- file.path(path, "man")
+    if (!dir.exists(man_dir)) {
+        return(invisible(character()))
+    }
+    existing <- list.files(man_dir, pattern = "\\.Rd$", full.names = TRUE)
+    # Compare by basename so path-spelling differences do not matter.
+    stale <- existing[!(basename(existing) %in% basename(generated))]
+
+    removed <- character()
+    for (f in stale) {
+        if (tinyrox_owns_rd(f)) {
+            file.remove(f)
+            removed <- c(removed, f)
+        }
+    }
+
+    if (length(removed) > 0 && !silent) {
+        message("Pruned ", length(removed), " stale Rd file(s): ",
+                paste(basename(removed), collapse = ", "))
+    }
+    invisible(removed)
+}
+
 #' Generate Rd Content for Grouped Blocks (Multiple @rdname Entries)
 #'
 #' Merges multiple documentation blocks that share an @rdname topic
@@ -505,13 +566,16 @@ write_rd <- function(
 #' @param topic Topic name (the @rdname value).
 #' @param entries List of list(tags, block) pairs sharing this topic.
 #' @param all_tags All parsed tags (for @inheritParams resolution).
+#' @param pkg_generics Character vector of S3 generics defined in the
+#'   package itself, used for S3 method detection in usage lines.
 #' @return Character string of merged Rd content.
 #' @keywords internal
-generate_rd_grouped <- function(topic, entries, all_tags, pkg_generics = character()) {
+generate_rd_grouped <- function(topic, entries, all_tags,
+                                pkg_generics = character()) {
     lines <- character()
 
     # Header
-    lines <- c(lines, "% tinyrox says don't edit this manually, but it can't stop you!")
+    lines <- c(lines, RD_MARKER)
 
     # Find primary block: whose tags$name matches the topic name
     primary_idx <- NULL
@@ -521,7 +585,9 @@ generate_rd_grouped <- function(topic, entries, all_tags, pkg_generics = charact
             break
         }
     }
-    if (is.null(primary_idx)) primary_idx <- 1L
+    if (is.null(primary_idx)) {
+        primary_idx <- 1L
+    }
     primary <- entries[[primary_idx]]
 
     # \name{} - topic name
@@ -544,7 +610,11 @@ generate_rd_grouped <- function(topic, entries, all_tags, pkg_generics = charact
     }
 
     # \title{} - from primary
-    title <- if (!is.null(primary$tags$title)) primary$tags$title else topic
+    if (!is.null(primary$tags$title)) {
+        title <- primary$tags$title
+    } else {
+        title <- topic
+    }
     lines <- c(lines, paste0("\\title{", escape_rd(title), "}"))
 
     # \usage{} - one format_usage() per function block
@@ -552,7 +622,8 @@ generate_rd_grouped <- function(topic, entries, all_tags, pkg_generics = charact
     for (entry in entries) {
         if (!is.null(entry$block$formals)) {
             usage_lines <- c(usage_lines,
-                escape_rd(format_usage(entry$tags$name, entry$block$formals$usage, pkg_generics)))
+                             escape_rd(format_usage(entry$tags$name,
+                        entry$block$formals$usage, pkg_generics)))
         }
     }
     if (length(usage_lines) > 0) {
@@ -583,15 +654,17 @@ generate_rd_grouped <- function(topic, entries, all_tags, pkg_generics = charact
         # Order: formals order (unique, preserving first occurrence), then any extras
         all_formal_names <- unique(all_formal_names)
         param_order <- c(
-            intersect(all_formal_names, names(merged_params)),
-            setdiff(names(merged_params), all_formal_names)
+                         intersect(all_formal_names, names(merged_params)),
+                         setdiff(names(merged_params), all_formal_names)
         )
         lines <- c(lines, "\\arguments{")
         for (i in seq_along(param_order)) {
             param <- param_order[i]
             desc_text <- escape_rd(merged_params[[param]])
             lines <- c(lines, paste0("\\item{", escape_rd(param), "}{", desc_text, "}"))
-            if (i < length(param_order)) lines <- c(lines, "")
+            if (i < length(param_order)) {
+                lines <- c(lines, "")
+            }
         }
         lines <- c(lines, "}")
     }
@@ -637,6 +710,13 @@ generate_rd_grouped <- function(topic, entries, all_tags, pkg_generics = charact
         lines <- c(lines, "}")
     }
 
+    # User-defined @section blocks - concatenated from all blocks
+    all_sections <- list()
+    for (entry in entries) {
+        all_sections <- c(all_sections, entry$tags$sections)
+    }
+    lines <- c(lines, render_sections(all_sections))
+
     # \references{} - from primary
     if (!is.null(primary$tags$references)) {
         lines <- c(lines, "\\references{")
@@ -647,7 +727,8 @@ generate_rd_grouped <- function(topic, entries, all_tags, pkg_generics = charact
     # \examples{} - concatenated from all blocks
     examples_parts <- character()
     for (entry in entries) {
-        if (!is.null(entry$tags$examples) && nchar(trimws(entry$tags$examples)) > 0) {
+        if (!is.null(entry$tags$examples) &&
+            nchar(trimws(entry$tags$examples)) > 0) {
             examples_parts <- c(examples_parts, entry$tags$examples)
         }
     }
@@ -680,12 +761,11 @@ generate_rd_grouped <- function(topic, entries, all_tags, pkg_generics = charact
 #'
 #' @param blocks List of documentation blocks from parse_package().
 #' @param path Package root path.
+#' @param cran_check Emit CRAN-compliance warnings (undocumented
+#'   parameters). Default TRUE.
 #' @return Character vector of generated file paths.
 #' @keywords internal
-generate_all_rd <- function(
-    blocks,
-    path = "."
-) {
+generate_all_rd <- function(blocks, path = ".", cran_check = TRUE) {
     generated <- character()
 
     # Find package-defined S3 generics for proper \method{}{} usage formatting
@@ -696,12 +776,7 @@ generate_all_rd <- function(
     all_blocks <- list()
 
     for (block in blocks) {
-        tags <- parse_tags(
-            block$lines,
-            block$object,
-            block$file,
-            block$line
-        )
+        tags <- parse_tags(block$lines, block$object, block$file, block$line)
 
         # Skip namespace-only blocks UNLESS they have @name (documentation pages)
         # Pattern: #' Title\n#' @name foo\nNULL creates a standalone doc page
@@ -716,19 +791,23 @@ generate_all_rd <- function(
     # Second pass: group blocks by topic (rdname or own name)
     # Each topic maps to a list of list(tags, block) entries
     topics <- list()
-    topic_order <- character()  # preserve encounter order
+    topic_order <- character() # preserve encounter order
 
     for (name in names(all_tags)) {
         tags <- all_tags[[name]]
         block <- all_blocks[[name]]
 
         # Skip if @noRd
-        if (tags$noRd) next
+        if (tags$noRd) {
+            next
+        }
 
         # Skip blocks with no documentation content (like roxygen2)
         # But keep blocks with @rdname - they merge into another block's page
         if (is.null(tags$title) && is.null(tags$description) &&
-                is.null(tags$rdname)) next
+            is.null(tags$rdname)) {
+            next
+        }
 
         # Handle package documentation specially
         if (block$type == "package") {
@@ -740,13 +819,18 @@ generate_all_rd <- function(
         }
 
         # Determine topic: @rdname overrides, otherwise use block name
-        topic <- if (!is.null(tags$rdname)) tags$rdname else tags$name
+        if (!is.null(tags$rdname)) {
+            topic <- tags$rdname
+        } else {
+            topic <- tags$name
+        }
 
         if (is.null(topics[[topic]])) {
             topics[[topic]] <- list()
             topic_order <- c(topic_order, topic)
         }
-        topics[[topic]] <- c(topics[[topic]], list(list(tags = tags, block = block)))
+        topics[[topic]] <- c(topics[[topic]],
+                             list(list(tags = tags, block = block)))
     }
 
     # Third pass: generate Rd for each topic
@@ -771,7 +855,9 @@ generate_all_rd <- function(
                 # object, don't use the object's formals for \usage (e.g.,
                 # @name pkg-package above .onLoad would produce bad usage)
                 fmls <- block$formals
-                if (tags$name != block$object) fmls <- NULL
+                if (tags$name != block$object) {
+                    fmls <- NULL
+                }
                 rd_content <- generate_rd(tags, fmls, block$file, pkg_generics)
             }
 
@@ -779,14 +865,16 @@ generate_all_rd <- function(
             generated <- c(generated, filepath)
 
             # Warn about undocumented params
-            if (block$type %in% c("function", "nn_module") && !is.null(block$formals)) {
+            if (cran_check &&
+                block$type %in% c("function", "nn_module") &&
+                !is.null(block$formals)) {
                 formal_names <- block$formals$names
                 undoc <- setdiff(formal_names, names(tags$params))
                 undoc <- setdiff(undoc, "...")
                 if (length(undoc) > 0) {
                     warning("Undocumented parameters in ", tags$name, ": ",
-                        paste(undoc, collapse = ", "),
-                        call. = FALSE)
+                            paste(undoc, collapse = ", "),
+                            call. = FALSE)
                 }
             }
         } else {
@@ -795,17 +883,34 @@ generate_all_rd <- function(
             filepath <- write_rd(rd_content, topic, path)
             generated <- c(generated, filepath)
 
-            # Warn about undocumented params across all entries
-            for (entry in entries) {
-                if (entry$block$type %in% c("function", "nn_module") &&
+            # Warn about undocumented params. Blocks sharing an @rdname
+            # merge into one page, so a parameter is documented if ANY
+            # block in the group documents it (matching the param merge in
+            # generate_rd_grouped()). Check each function's formals against
+            # the group-wide union, with @inheritParams resolved.
+            if (cran_check) {
+                documented <- character()
+                for (entry in entries) {
+                    etags <- entry$tags
+                    if (length(etags$inheritParams) > 0) {
+                        etags <- resolve_inherit_params(etags, all_tags,
+                            entry$block$formals)
+                    }
+                    documented <- c(documented, names(etags$params))
+                }
+                documented <- unique(documented)
+                for (entry in entries) {
+                    if (entry$block$type %in% c("function", "nn_module") &&
                         !is.null(entry$block$formals)) {
-                    formal_names <- entry$block$formals$names
-                    undoc <- setdiff(formal_names, names(entry$tags$params))
-                    undoc <- setdiff(undoc, "...")
-                    if (length(undoc) > 0) {
-                        warning("Undocumented parameters in ", entry$tags$name, ": ",
-                            paste(undoc, collapse = ", "),
-                            call. = FALSE)
+                        formal_names <- entry$block$formals$names
+                        undoc <- setdiff(formal_names, documented)
+                        undoc <- setdiff(undoc, "...")
+                        if (length(undoc) > 0) {
+                            warning("Undocumented parameters in ",
+                                    entry$tags$name, ": ",
+                                    paste(undoc, collapse = ", "),
+                                    call. = FALSE)
+                        }
                     }
                 }
             }
@@ -838,15 +943,11 @@ get_package_name <- function(path) {
 #' @param source_file Source file path.
 #' @return Character string of Rd content.
 #' @keywords internal
-generate_package_rd <- function(
-    tags,
-    pkg_name,
-    source_file
-) {
+generate_package_rd <- function(tags, pkg_name, source_file) {
     lines <- character()
 
     # Header - distinctively tinyrox
-    lines <- c(lines, "% tinyrox says don't edit this manually, but it can't stop you!")
+    lines <- c(lines, RD_MARKER)
 
     # docType
     lines <- c(lines, "\\docType{package}")
@@ -856,52 +957,31 @@ generate_package_rd <- function(
     lines <- c(lines, paste0("\\alias{", pkg_name, "}"))
     lines <- c(lines, paste0("\\alias{", pkg_name, "-package}"))
 
-    # Title - don't duplicate package name if title already starts with it
-    title <- if (!is.null(tags$title)) {
-        if (grepl(paste0("^", pkg_name, ":"), tags$title, ignore.case = TRUE)) {
-            tags$title
-        } else {
-            paste0(pkg_name, ": ", tags$title)
-        }
-    } else {
-        pkg_name
-    }
-    lines <- c(lines, paste0("\\title{", escape_rd(title), "}"))
+    # Title / Description / Author / Maintainer come from DESCRIPTION via base-R
+    # Rd macros. DESCRIPTION is the source of truth; no duplication in the R file.
+    lines <- c(lines, paste0("\\title{\\packageTitle{", pkg_name, "}}"))
+    lines <- c(lines,
+               paste0("\\description{\\packageDescription{", pkg_name, "}}"))
 
-    # Description
-    if (!is.null(tags$description)) {
-        lines <- c(lines, "\\description{")
-        desc_escaped <- escape_rd(tags$description)
-        # Preserve description exactly as written (roxygen2 doesn't wrap)
-        lines <- c(lines, desc_escaped)
+    # Details - hand-written prose from @details or paragraphs 3+ of the pre-tag block.
+    # This is the slot for design notes, limitations, etc.
+    if (!is.null(tags$details) && nchar(trimws(tags$details)) > 0) {
+        lines <- c(lines, "\\details{")
+        lines <- c(lines, escape_rd(tags$details))
         lines <- c(lines, "}")
     }
 
-    # Sections (like @section Core packages:)
-    if (!is.null(tags$sections)) {
-        for (sec in tags$sections) {
-            lines <- c(lines, paste0("\\section{", escape_rd(sec$title), "}{"))
-            lines <- c(lines, sec$content) # Content may have Rd markup, don't escape
-            lines <- c(lines, "}")
-        }
-    }
+    # User-defined sections (@section Title: ...)
+    lines <- c(lines, render_sections(tags$sections))
 
-    # Author (from tags or DESCRIPTION)
-    if (!is.null(tags$author)) {
-        lines <- c(lines, "\\author{")
-        lines <- c(lines, escape_rd(tags$author))
-        lines <- c(lines, "}")
-    } else {
-        # Try to get maintainer from DESCRIPTION (like roxygen2)
-        # source_file is in R/, so go up one level to package root
-        pkg_root <- dirname(dirname(source_file))
-        author_info <- get_maintainer_from_desc(pkg_root)
-        if (!is.null(author_info)) {
-            lines <- c(lines, "\\author{")
-            lines <- c(lines, author_info)
-            lines <- c(lines, "}")
-        }
-    }
+    # Auto-generated function index
+    lines <- c(lines, paste0("\\section{Package Content}{\\packageIndices{",
+                             pkg_name, "}}"))
+
+    # Author and Maintainer from DESCRIPTION via macros
+    lines <- c(lines, paste0("\\author{\\packageAuthor{", pkg_name, "}}"))
+    lines <- c(lines, paste0("\\section{Maintainer}{\\packageMaintainer{",
+                             pkg_name, "}}"))
 
     # Keywords
     for (kw in tags$keywords) {
@@ -922,11 +1002,7 @@ generate_package_rd <- function(
 #' @param formals Current function's formals (list with names and usage).
 #' @return Updated tags with inherited params merged in.
 #' @keywords internal
-resolve_inherit_params <- function(
-    tags,
-    all_tags,
-    formals
-) {
+resolve_inherit_params <- function(tags, all_tags, formals) {
     # Get the current function's formal parameter names
 
     if (!is.null(formals)) {
@@ -942,7 +1018,7 @@ resolve_inherit_params <- function(
             if (length(ext_params) > 0) {
                 for (param_name in names(ext_params)) {
                     if (param_name %in% formal_names &&
-                            !param_name %in% names(tags$params)) {
+                        !param_name %in% names(tags$params)) {
                         tags$params[[param_name]] <- ext_params[[param_name]]
                     }
                 }
@@ -955,7 +1031,7 @@ resolve_inherit_params <- function(
 
         if (is.null(source_tags)) {
             warning("@inheritParams: source function '", source_name,
-                "' not found in package", call. = FALSE)
+                    "' not found in package", call. = FALSE)
             next
         }
 
@@ -989,19 +1065,18 @@ resolve_inherit_params <- function(
 #' @keywords internal
 resolve_external_params <- function(source_name) {
     parts <- strsplit(source_name, "::")[[1]]
-    if (length(parts) != 2) return(list())
+    if (length(parts) != 2) {
+        return(list())
+    }
 
     pkg <- parts[1]
     fun <- parts[2]
 
     # Use help() to find the Rd and the internal parser to read it
-    help_obj <- tryCatch(
-        utils::help(fun, package = (pkg), help_type = "text"),
-        error = function(e) NULL
-    )
+    help_obj <- tryCatch(utils::help(fun, package = (pkg), help_type = "text"),
+                         error = function(e) NULL)
     if (is.null(help_obj) || length(help_obj) == 0) {
-        warning("@inheritParams: '", source_name, "' not found",
-            call. = FALSE)
+        warning("@inheritParams: '", source_name, "' not found", call. = FALSE)
         return(list())
     }
 
@@ -1009,22 +1084,30 @@ resolve_external_params <- function(source_name) {
         rd_file <- help_obj[[1]]
         tools::parse_Rd(paste0(rd_file, ".Rd"))
     }, error = function(e) NULL)
-    if (is.null(rd)) return(list())
+    if (is.null(rd)) {
+        return(list())
+    }
 
     # Find the \arguments section in the parsed Rd object
     args_idx <- which(vapply(
-        rd,
-        function(x) identical(attr(x, "Rd_tag"), "\\arguments"),
-        logical(1)
-    ))
-    if (length(args_idx) == 0) return(list())
+                             rd,
+                             function(x) identical(attr(x, "Rd_tag"), "\\arguments"),
+                             logical(1)
+        ))
+    if (length(args_idx) == 0) {
+        return(list())
+    }
 
     params <- list()
     args_section <- rd[[args_idx[1]]]
 
     for (item in args_section) {
-        if (!identical(attr(item, "Rd_tag"), "\\item")) next
-        if (length(item) < 2) next
+        if (!identical(attr(item, "Rd_tag"), "\\item")) {
+            next
+        }
+        if (length(item) < 2) {
+            next
+        }
 
         # item[[1]] is the param name, item[[2]] is the description
         # Flatten to character, preserving Rd markup
@@ -1045,4 +1128,3 @@ resolve_external_params <- function(source_name) {
 
     params
 }
-
