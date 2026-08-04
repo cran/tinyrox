@@ -139,7 +139,7 @@ generate_rd <- function(tags, formals = NULL, source_file = NULL,
     if (!is.null(tags$examples) && nchar(trimws(tags$examples)) > 0) {
         lines <- c(lines, "\\examples{")
         # Escape % in examples (Rd comment character), but leave other content verbatim
-        examples_escaped <- gsub("%", "\\\\%", tags$examples)
+        examples_escaped <- escape_percent(tags$examples)
         lines <- c(lines, examples_escaped)
         lines <- c(lines, "}")
     }
@@ -229,7 +229,7 @@ generate_data_rd <- function(tags, source_file = NULL, format_string = NULL) {
     # Examples (before seealso like roxygen2)
     if (!is.null(tags$examples) && nchar(trimws(tags$examples)) > 0) {
         lines <- c(lines, "\\examples{")
-        examples_escaped <- gsub("%", "\\\\%", tags$examples)
+        examples_escaped <- escape_percent(tags$examples)
         lines <- c(lines, examples_escaped)
         lines <- c(lines, "}")
     }
@@ -303,6 +303,20 @@ format_object_info <- function(name, pkg_path) {
     paste0("An object of class \\code{", obj_class, "} of length ", obj_len, ".")
 }
 
+#' Escape Unescaped Percent Signs
+#'
+#' Escapes % as \\% for Rd, leaving an already-escaped \\% alone. roxygen2
+#' makes authors escape % themselves, so sources migrated from roxygen2
+#' carry \\% already; escaping unconditionally would double it into \\\\%,
+#' which Rd reads as a literal backslash plus a comment start (#31).
+#'
+#' @param text Text to escape.
+#' @return Text with every % escaped exactly once.
+#' @keywords internal
+escape_percent <- function(text) {
+    gsub("(?<!\\\\)%", "\\\\%", text, perl = TRUE)
+}
+
 #' Escape Special Characters for Rd
 #'
 #' Escapes special characters for Rd format, but detects and preserves
@@ -319,24 +333,23 @@ escape_rd <- function(text) {
     # Check if text contains Rd markup (backslash commands like \describe, \item,
     # \Sexpr[...]{}, etc.). If so, pass through with minimal escaping (just %).
     if (grepl("\\\\[a-zA-Z]+(\\[.*\\])?\\{", text)) {
-        text <- gsub("%", "\\\\%", text)
-        return(text)
+        return(escape_percent(text))
     }
 
     # No Rd markup - escape braces and percent only
     # Don't escape backslashes - unknown sequences pass through in Rd (like roxygen2)
     text <- gsub("\\{", "\\\\{", text)
     text <- gsub("\\}", "\\\\}", text)
-    text <- gsub("%", "\\\\%", text)
-
-    text
+    escape_percent(text)
 }
 
 #' Format Usage Line
 #'
 #' Formats the function usage, wrapping to multiple lines if needed.
-#' Follows roxygen2 style: each argument on its own line if total > 80 chars.
-#' S3 methods use the \\method syntax.
+#' Follows roxygen2: single line when the bare call is under 80 characters,
+#' otherwise one argument per line at two-space indent, with each overlong
+#' argument wrapped to the 90-character Rd limit. S3 methods use the
+#' \\method syntax.
 #'
 #' @param name Function name.
 #' @param args Character vector of arguments with defaults.
@@ -367,56 +380,83 @@ format_usage <- function(name, args, pkg_generics = character()) {
 
     # For replacement functions, last arg is 'value' which goes on the right side
     if (is_replacement && length(args) >= 1) {
-        lhs_args <- args[-length(args)]
-        single_line <- paste0(display_name, "(", paste(lhs_args, collapse = ", "), ") <- value")
+        call_args <- args[-length(args)]
+        suffix <- " <- value"
     } else {
-        single_line <- paste0(display_name, "(", paste(args, collapse = ", "), ")")
+        call_args <- args
+        suffix <- ""
     }
 
-    # If short enough, use single line
-    if (nchar(single_line) <= 80) {
-        return(single_line)
-    }
-
-    # For replacement functions, wrap only the LHS args
-    if (is_replacement && length(args) >= 1) {
-        wrap_args <- args[-length(args)]
-    } else {
-        wrap_args <- args
-    }
-
+    # Width decision is made on the bare name, like roxygen2: \method markup
+    # and the replacement suffix are excluded, leaving headroom under the
+    # 90-character Rd limit for the markup they add.
     if (is_replacement) {
-        close_suffix <- ") <- value"
+        bare_name <- sub("<-$", "", name)
     } else {
-        close_suffix <- ")"
+        bare_name <- name
+    }
+    bare <- paste0(bare_name, "(", paste(call_args, collapse = ", "), ")")
+    if (nchar(bare, type = "width") < 80) {
+        return(paste0(display_name, "(",
+                      paste(call_args, collapse = ", "), ")", suffix))
     }
 
-    # Wrap to multiple lines, packing multiple args per line
-    # Continuation lines indented to align after opening paren
-    open <- paste0(display_name, "(")
-    cont_indent <- paste(rep(" ", nchar(open)), collapse = "")
+    # One argument per line at two-space indent, each wrapped to 90 chars
+    wrapped <- vapply(paste0("  ", call_args), wrap_usage_arg,
+                      character(1), USE.NAMES = FALSE)
+    paste0(display_name, "(\n", paste(wrapped, collapse = ",\n"), "\n)", suffix)
+}
+
+#' Wrap a Single Usage Argument
+#'
+#' Greedy space-fill wrap replicating roxygen2's wrapUsage(): once a line
+#' exceeds the width, the last space outside a quoted string becomes a
+#' newline, and continuation lines get a fixed indent. Quoted strings are
+#' never broken.
+#'
+#' @param x Argument string, including its two-space usage indent.
+#' @param width Maximum line width.
+#' @param indent Number of spaces prefixed to continuation lines.
+#' @return Wrapped string, possibly containing newlines.
+#' @keywords internal
+wrap_usage_arg <- function(x, width = 90L, indent = 4L) {
+    if (nchar(x) < width) {
+        return(x)
+    }
+
+    # Quote tracking is deliberately naive (a quote char always toggles,
+    # backslash escapes are not special) to stay byte-identical to
+    # roxygen2's wrapUsage().
+    pad <- strsplit(strrep(" ", indent), "")[[1]]
+    chars <- strsplit(x, "")[[1]]
     lines <- character()
-    current <- open
+    line <- character()
+    last_space <- 0L
+    quote_char <- ""
 
-    for (i in seq_along(wrap_args)) {
-        arg <- wrap_args[i]
-        if (i < length(wrap_args)) {
-            suffix <- ", "
-        } else {
-            suffix <- ""
+    for (ch in chars) {
+        if (quote_char != "") {
+            if (ch == quote_char) {
+                quote_char <- ""
+            }
+        } else if (ch == "\"" || ch == "'" || ch == "`") {
+            quote_char <- ch
         }
-        piece <- paste0(arg, suffix)
 
-        if (nchar(current) + nchar(piece) > 80 && current != open) {
-            lines <- c(lines, sub(",? $", ",", current))
-            current <- paste0(cont_indent, piece)
-        } else {
-            current <- paste0(current, piece)
+        line <- c(line, ch)
+        if (ch == " " && quote_char == "") {
+            last_space <- length(line)
+        }
+
+        if (length(line) >= width && last_space > 0L) {
+            lines <- c(lines,
+                       paste(line[seq_len(last_space - 1L)], collapse = ""))
+            line <- c(pad, line[seq_along(line) > last_space])
+            last_space <- 0L
         }
     }
 
-    current <- paste0(current, close_suffix)
-    lines <- c(lines, current)
+    lines <- c(lines, paste(line, collapse = ""))
     paste(lines, collapse = "\n")
 }
 
@@ -734,7 +774,7 @@ generate_rd_grouped <- function(topic, entries, all_tags,
     }
     if (length(examples_parts) > 0) {
         lines <- c(lines, "\\examples{")
-        lines <- c(lines, gsub("%", "\\\\%", paste(examples_parts, collapse = "\n\n")))
+        lines <- c(lines, escape_percent(paste(examples_parts, collapse = "\n\n")))
         lines <- c(lines, "}")
     }
 
