@@ -1,7 +1,7 @@
 Package: tinyrox
 Title: Minimal R Documentation Generator
-Version: 0.4.1
-Date: 2026-08-04
+Version: 0.4.2
+Date: 2026-11-24
 Authors@R: c(
     person("Troy", "Hernandez", email = "troy@cornball.ai", role = c("aut", "cre"),
            comment = c(ORCID = "0009-0005-4248-604X")),
@@ -17,10 +17,10 @@ Encoding: UTF-8
 Imports: utils
 Suggests: tinytest
 NeedsCompilation: no
-Packaged: 2026-08-04 22:15:42 UTC; troy
+Packaged: 2026-11-25 14:46:58 UTC; troy
 Author: Troy Hernandez [aut, cre] (ORCID:
     <https://orcid.org/0009-0005-4248-604X>),
   cornball.ai [cph]
 Maintainer: Troy Hernandez <troy@cornball.ai>
 Repository: CRAN
-Date/Publication: 2026-08-04 22:50:02 UTC
+Date/Publication: 2026-11-25 18:10:02 UTC

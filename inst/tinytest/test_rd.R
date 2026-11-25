@@ -283,6 +283,21 @@ repl_usage <- tinyrox:::format_usage("dim<-", repl_args)
 expect_equal(repl_usage,
              paste0("dim(\n  x,\n  ", strrep("y", 80), "\n) <- value"))
 
+# A replacement S3 method: the `<-` sits on the generic, not at the end
+# of the name, and R CMD check wants the generic without it and value on
+# the right (`\method{$}{cls}(x, name) <- value`), never
+# `\method{$<-}{cls}(x, name, value)`.
+expect_equal(tinyrox:::format_usage("$<-.myclass", c("x", "name", "value")),
+             "\\method{$}{myclass}(x, name) <- value")
+expect_equal(tinyrox:::format_usage("[[<-.myclass", c("x", "i", "value")),
+             "\\method{[[}{myclass}(x, i) <- value")
+expect_equal(tinyrox:::format_usage("dim<-.myclass", c("x", "value")),
+             "\\method{dim}{myclass}(x) <- value")
+# and a replacement generic defined in the package itself
+expect_equal(tinyrox:::format_usage("label<-.myclass", c("x", "value"),
+                                    pkg_generics = "label<-"),
+             "\\method{label}{myclass}(x) <- value")
+
 # wrap_usage_arg: quoted strings are never broken
 expect_equal(
   tinyrox:::wrap_usage_arg('  x = c("a b c d e f", "g h i", "j k l")',
@@ -395,3 +410,62 @@ test_package_sentinel_document <- function() {
   expect_equal(res2$pruned, character(0))
 }
 test_package_sentinel_document()
+
+# --- Data documentation through the full document() flow: the "name" ---
+# directive plus @format and @source. Regression: the block used to be
+# dropped silently (no Rd, no warning), leaving the dataset undocumented.
+test_data_directive_document <- function() {
+  pkg <- file.path(tempdir(), "datapkg")
+  on.exit(unlink(pkg, recursive = TRUE), add = TRUE)
+  dir.create(file.path(pkg, "R"), recursive = TRUE, showWarnings = FALSE)
+  writeLines(c(
+      "Package: datapkg", "Title: T", "Version: 0.0.1",
+      "Description: D.",
+      "Authors@R: person('A', 'B', email='a@b.c', role=c('aut','cre'))"
+    ), file.path(pkg, "DESCRIPTION"))
+  writeLines(c(
+      "#' Example measurements",
+      "#'",
+      "#' Twelve made-up observations.",
+      "#'",
+      "#' @format A data frame with 12 rows and 2 columns:",
+      "#' \\describe{",
+      "#'   \\item{x}{Numeric. The measurement.}",
+      "#'   \\item{g}{Character. The group.}",
+      "#' }",
+      "#' @source Simulated for the test.",
+      "#' @examples",
+      "#' str(measurements)",
+      "\"measurements\""),
+      file.path(pkg, "R", "data.R"))
+
+  # No warnings: @format and @source are supported tags, not unknowns.
+  expect_silent(tinyrox::document(pkg, cran_check = FALSE, silent = TRUE))
+
+  rd_path <- file.path(pkg, "man", "measurements.Rd")
+  expect_true(file.exists(rd_path))
+  rd <- readLines(rd_path)
+  expect_true("\\docType{data}" %in% rd)
+  expect_true("\\alias{measurements}" %in% rd)
+  expect_true("\\keyword{datasets}" %in% rd)
+  # The author's @format survives, markup intact, over the auto fallback
+  expect_true(any(grepl("12 rows and 2 columns", rd)))
+  expect_true(any(grepl("\\item{x}{Numeric. The measurement.}", rd,
+                        fixed = TRUE)))
+  # @source is rendered
+  expect_true("\\source{" %in% rd)
+  expect_true(any(grepl("Simulated for the test.", rd, fixed = TRUE)))
+  # Usage is the bare object name, and the dataset is not exported
+  expect_true("measurements" %in% rd)
+  ns <- readLines(file.path(pkg, "NAMESPACE"))
+  expect_false(any(grepl("measurements", ns, fixed = TRUE)))
+}
+test_data_directive_document()
+
+# Comma-separated @param names sort at their earliest formal (#40)
+expect_equal(tinyrox:::order_params(c("z", "b,c", "a"), c("a", "b", "c")),
+             c("a", "b,c", "z"))
+expect_equal(tinyrox:::order_params(c("y", "x"), character()), c("y", "x"))
+expect_equal(tinyrox:::documented_params(list("a,b" = "d", c = "e")),
+             c("a", "b", "c"))
+expect_equal(tinyrox:::documented_params(list()), character())
